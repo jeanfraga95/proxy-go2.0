@@ -4,11 +4,12 @@ set -e
 INSTALL_DIR="/opt/proxy-go2.0"
 SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
+LOG_DIR="/var/log"
 
-echo "=== PROXY-GO2.0 TUNNEL ==="
+echo "=== PROXY-GO2.0 (PERSISTENTE) ==="
 
 sudo rm -rf "$INSTALL_DIR"
-mkdir -p "$SRC_DIR"
+sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "$LOG_DIR"
 cd "$SRC_DIR"
 
 git clone https://github.com/jeanfraga95/proxy-go2.0.git .
@@ -26,11 +27,14 @@ cd "$SRC_DIR"
 go mod tidy
 go build -o "$BIN" .
 
-chmod +x "$BIN"
+sudo chmod +x "$BIN"
+sudo chown root:root "$BIN"
+sudo touch "$stateFile"
+sudo chown root:root "$stateFile"
 
 sudo tee /etc/systemd/system/proxy-go2.0.service > /dev/null << EOF
 [Unit]
-Description=Proxy Go 2.0 Tunnel
+Description=Proxy Go 2.0
 After=network.target
 
 [Service]
@@ -45,6 +49,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-go2.0
 
-echo "INSTALADO SEM ERROS!"
+echo "INSTALADO COM PERSISTÊNCIA!"
 echo "Menu: sudo $BIN"
-echo "Teste SOCKS5: curl -x socks5://127.0.0.1:80 httpbin.org/ip"
+echo "Estado salvo em: $stateFile"
