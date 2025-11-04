@@ -45,6 +45,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-go2.0
 
-echo "INSTALADO!"
+echo "INSTALADO SEM ERROS!"
 echo "Menu: sudo $BIN"
-echo "Teste: curl -x socks5://localhost:80 httpbin.org/ip"
+echo "Teste SOCKS5: curl -x socks5://127.0.0.1:80 httpbin.org/ip"
