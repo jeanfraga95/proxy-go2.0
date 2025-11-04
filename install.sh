@@ -5,7 +5,7 @@ INSTALL_DIR="/opt/proxy-go2.0"
 SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
 
-echo "=== PROXY-GO2.0 (FINAL - SEM TLS) ==="
+echo "=== PROXY-GO2.0 (HTTP INJECTOR READY) ==="
 
 sudo rm -rf "$INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "/var/log"
@@ -30,6 +30,6 @@ sudo chmod +x "$BIN"
 sudo touch "$INSTALL_DIR/ports.json"
 sudo chown root:root "$INSTALL_DIR/ports.json"
 
-echo "INSTALADO COM SUCESSO!"
+echo "INSTALADO!"
 echo "Menu: sudo $BIN"
-echo "Teste: curl -x socks5://127.0.0.1:80 http://httpbin.org/ip"
+echo "HTTP Injector: Use SOCKS5 → IP:PORT"
