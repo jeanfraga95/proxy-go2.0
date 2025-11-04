@@ -8,17 +8,15 @@ import (
 )
 
 func main() {
-    portFlag := flag.Int("port", 0, "Iniciar proxy diretamente na porta (sem menu)")
+    port := flag.Int("port", 0, "Iniciar proxy na porta")
     flag.Parse()
 
-    if *portFlag > 0 {
-        log.Printf("Iniciando proxy na porta %d (modo background)...\n", *portFlag)
-        if err := StartServer(*portFlag); err != nil {
-            log.Fatal("Erro ao iniciar servidor: ", err)
+    if *port > 0 {
+        if err := StartServer(*port); err != nil {
+            log.Fatal(err)
         }
-        select {} // Mantém vivo
+        select {}
     } else {
-        fmt.Println("=== Proxy Go 2.0 ===")
         RunMenu()
     }
 }
