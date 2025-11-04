@@ -2,13 +2,9 @@
 package main
 
 import (
-    "crypto/sha1"
-    "encoding/base64"
     "crypto/tls"
-    "fmt"
     "log"
     "net"
-    "net/http"
     "os"
     "os/exec"
     "strings"
@@ -64,35 +60,44 @@ func handleClient(rawConn net.Conn, tlsConfig *tls.Config, port int) {
     data := string(buf[:n])
 
     // === DETECÇÃO DE PROTOCOLO ===
-    if strings.HasPrefix(data, "GET") || strings.Contains(data, "Upgrade: websocket") {
-        // WSS: múltiplos Upgrade/Connection
+    if strings.Contains(strings.ToUpper(data), "UPGRADE: WEBSOCKET") ||
+       strings.Contains(strings.ToUpper(data), "CONNECT") {
+        // WSS ou HTTP CONNECT
         sendResponse(tlsConn, "HTTP/1.1 101 PROXY-GO2.0\r\n\r\n")
-        handleWSS(tlsConn)
+        handleTunnel(tlsConn)
     } else if buf[0] == 0x05 {
         // SOCKS5
         sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
         handleSOCKS5(tlsConn)
     } else {
-        // Fallback
         sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
     }
 }
 
 func sendResponse(conn net.Conn, msg string) {
     conn.Write([]byte(msg))
-    log.Printf("Resposta enviada: %s", strings.TrimSpace(msg))
+    log.Printf("→ %s", strings.TrimSpace(msg))
+}
+
+func handleTunnel(conn net.Conn) {
+    log.Println("Túnel WSS/CONNECT ativo")
+    // Echo ou forwarding
+    buf := make([]byte, 4096)
+    for {
+        n, err := conn.Read(buf)
+        if err != nil {
+            break
+        }
+        conn.Write(buf[:n])
+    }
 }
 
 func handleSOCKS5(conn net.Conn) {
     log.Println("SOCKS5 → Autenticando via SSH...")
     authenticateWithSSH(conn)
     log.Println("SOCKS5 Tunnel ativo")
-}
-
-func handleWSS(conn net.Conn) {
-    log.Println("WSS → Túnel WebSocket ativo")
-    // Echo ou forwarding
-    buf := make([]byte, 1024)
+    // Forwarding
+    buf := make([]byte, 4096)
     for {
         n, err := conn.Read(buf)
         if err != nil {
