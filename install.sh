@@ -5,10 +5,10 @@ INSTALL_DIR="/opt/proxy-go2.0"
 SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
 
-echo "=== PROXY-GO2.0 (HTTP INJECTOR READY) ==="
+echo "=== PROXY-GO2.0 (WSS + HTTP INJECTOR) ==="
 
 sudo rm -rf "$INSTALL_DIR"
-sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "/var/log"
+sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "/var/log" "/tmp"
 cd "$SRC_DIR"
 
 git clone https://github.com/jeanfraga95/proxy-go2.0.git .
@@ -32,4 +32,5 @@ sudo chown root:root "$INSTALL_DIR/ports.json"
 
 echo "INSTALADO!"
 echo "Menu: sudo $BIN"
-echo "HTTP Injector: Use SOCKS5 → IP:PORT"
+echo "HTTP Injector: SOCKS5 → SEU_IP:80"
+echo "WSS: wss://SEU_IP:80"
