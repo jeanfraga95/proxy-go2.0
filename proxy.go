@@ -22,20 +22,25 @@ type ProxyInstance struct {
     Running bool
 }
 
-var instances = make(map[int]*ProxyInstance)
-var mu sync.Mutex
+var (
+    instances = make(map[int]*ProxyInstance)
+    mu        sync.Mutex
+)
 
-func Menu() {
+func RunMenu() {
     scanner := bufio.NewScanner(os.Stdin)
     for {
         fmt.Println("\n--- Menu Proxy ---")
         fmt.Println("1. Abrir porta")
         fmt.Println("2. Fechar porta")
-        fmt.Println("3. Ver logs da porta")
-        fmt.Println("4. Listar portas ativas")
+        fmt.Println("3. Ver logs")
+        fmt.Println("4. Listar portas")
         fmt.Println("5. Sair")
         fmt.Print("Escolha: ")
-        scanner.Scan()
+
+        if !scanner.Scan() {
+            break
+        }
         choice := strings.TrimSpace(scanner.Text())
 
         switch choice {
@@ -43,11 +48,12 @@ func Menu() {
             fmt.Print("Porta: ")
             scanner.Scan()
             port, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
-            if err := StartProxy(port); err != nil {
+            if err := StartBackgroundProxy(port); err != nil {
                 fmt.Printf("Erro: %v\n", err)
             } else {
-                fmt.Printf("Proxy iniciado na porta %d (PID: %d)\n", port, instances[port].PID)
+                fmt.Printf("Proxy iniciado na porta %d\n", port)
             }
+
         case "2":
             fmt.Print("Porta: ")
             scanner.Scan()
@@ -55,39 +61,38 @@ func Menu() {
             if err := StopProxy(port); err != nil {
                 fmt.Printf("Erro: %v\n", err)
             } else {
-                fmt.Printf("Proxy fechado na porta %d\n", port)
+                fmt.Printf("Porta %d fechada.\n", port)
             }
+
         case "3":
             fmt.Print("Porta: ")
             scanner.Scan()
             port, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
             ViewLogs(port)
+
         case "4":
-            ListPorts()
+            ListActivePorts()
+
         case "5":
             fmt.Println("Saindo...")
-            for _, inst := range instances {
-                StopProxy(inst.Port)
-            }
             return
+
         default:
-            fmt.Println("Opção inválida!")
+            fmt.Println("Opção inválida.")
         }
     }
 }
 
-func StartProxy(port int) error {
+func StartBackgroundProxy(port int) error {
     mu.Lock()
-    defer mu.Unlock()
     if _, exists := instances[port]; exists {
+        mu.Unlock()
         return fmt.Errorf("porta %d já em uso", port)
     }
+    mu.Unlock()
 
-    // Inicia como processo background (nohup para detach)
-    cmd := exec.Command("nohup", os.Args[0], "-port="+strconv.Itoa(port))
-    cmd.SysProcAttr = &syscall.SysProcAttr{
-        Setsid: true, // Novo session para background
-    }
+    cmd := exec.Command(os.Args[0], "-port="+strconv.Itoa(port))
+    cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
     if err := cmd.Start(); err != nil {
         return err
     }
@@ -98,66 +103,85 @@ func StartProxy(port int) error {
         PID:     cmd.Process.Pid,
         Running: true,
     }
+
+    mu.Lock()
     instances[port] = inst
+    mu.Unlock()
 
-    // Log inicial
-    logFile := fmt.Sprintf("/var/log/proxy-%d.log", port)
-    go tailLogs(logFile, inst) // Goroutine para capturar logs em tempo real
-
+    go captureLogs(port, inst)
     return nil
 }
 
 func StopProxy(port int) error {
     mu.Lock()
-    defer mu.Unlock()
-    inst, exists := instances[port]
-    if !exists || !inst.Running {
-        return fmt.Errorf("porta %d não está rodando", port)
+    inst, ok := instances[port]
+    mu.Unlock()
+    if !ok || !inst.Running {
+        return fmt.Errorf("porta %d não está ativa", port)
     }
 
-    if err := inst.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
-        return err
-    }
+    inst.Cmd.Process.Signal(syscall.SIGTERM)
     inst.Running = false
+    mu.Lock()
     delete(instances, port)
+    mu.Unlock()
     return nil
 }
 
 func ViewLogs(port int) {
     mu.Lock()
-    inst, exists := instances[port]
+    inst, ok := instances[port]
     mu.Unlock()
-    if !exists {
-        fmt.Printf("Porta %d não encontrada\n", port)
+    if !ok {
+        fmt.Printf("Porta %d não encontrada.\n", port)
         return
     }
-    fmt.Printf("Logs da porta %d (últimos 10):\n", port)
+
     inst.Mutex.Lock()
-    for i, log := range inst.Logs[len(inst.Logs)-10:] {
-        fmt.Printf("%d: %s\n", i, log)
-    }
+    logs := inst.Logs
     inst.Mutex.Unlock()
+
+    fmt.Printf("=== Logs da porta %d (últimos 15) ===\n", port)
+    start := len(logs) - 15
+    if start < 0 {
+        start = 0
+    }
+    for i := start; i < len(logs); i++ {
+        fmt.Println(logs[i])
+    }
 }
 
-func ListPorts() {
+func ListActivePorts() {
+    mu.Lock()
+    defer mu.Unlock()
+    if len(instances) == 0 {
+        fmt.Println("Nenhuma porta ativa.")
+        return
+    }
     fmt.Println("Portas ativas:")
     for port, inst := range instances {
         status := "RUNNING"
         if !inst.Running {
             status = "STOPPED"
         }
-        fmt.Printf("Porta %d (PID: %d) - %s\n", port, inst.PID, status)
+        fmt.Printf("  • %d (PID: %d) → %s\n", port, inst.PID, status)
     }
 }
 
-func tailLogs(logFile string, inst *ProxyInstance) {
-    // Simula captura de logs (em prod, use tail -f ou journalctl)
-    for {
-        time.Sleep(5 * time.Second)
-        // Adicione logs simulados ou leia arquivo real
+func captureLogs(port int, inst *ProxyInstance) {
+    ticker := time.NewTicker(3 * time.Second)
+    for range ticker.C {
+        mu.Lock()
+        if !instances[port].Running {
+            mu.Unlock()
+            break
+        }
+        mu.Unlock()
+
+        logEntry := fmt.Sprintf("[%s] Porta %d: conexão simulada", time.Now().Format("15:04:05"), port)
         inst.Mutex.Lock()
-        inst.Logs = append(inst.Logs, time.Now().Format("2006-01-02 15:04:05")+" - Conexão recebida")
-        if len(inst.Logs) > 100 { // Limite
+        inst.Logs = append(inst.Logs, logEntry)
+        if len(inst.Logs) > 100 {
             inst.Logs = inst.Logs[1:]
         }
         inst.Mutex.Unlock()
