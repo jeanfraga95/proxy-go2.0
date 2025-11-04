@@ -5,7 +5,7 @@ INSTALL_DIR="/opt/proxy-go2.0"
 SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
 
-echo "=== PROXY-GO2.0 FINAL ==="
+echo "=== PROXY-GO2.0 (FINAL - SEM TLS) ==="
 
 sudo rm -rf "$INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "/var/log"
@@ -30,6 +30,6 @@ sudo chmod +x "$BIN"
 sudo touch "$INSTALL_DIR/ports.json"
 sudo chown root:root "$INSTALL_DIR/ports.json"
 
-echo "INSTALADO!"
+echo "INSTALADO COM SUCESSO!"
 echo "Menu: sudo $BIN"
-echo "Logs: sudo tail -f /var/log/proxy-go2.0-*.log"
+echo "Teste: curl -x socks5://127.0.0.1:80 http://httpbin.org/ip"
