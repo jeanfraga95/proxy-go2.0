@@ -5,24 +5,20 @@ import (
     "flag"
     "fmt"
     "log"
-    "os"
-    "os/signal"
-    "syscall"
 )
 
 func main() {
-    portFlag := flag.Int("port", 0, "Porta para iniciar o proxy diretamente (sem menu)")
+    portFlag := flag.Int("port", 0, "Iniciar proxy diretamente na porta (sem menu)")
     flag.Parse()
 
     if *portFlag > 0 {
-        // Modo direto: inicia proxy na porta sem menu
-        if err := StartProxy(*portFlag); err != nil {
-            log.Fatal(err)
+        log.Printf("Iniciando proxy na porta %d (modo background)...\n", *portFlag)
+        if err := StartServer(*portFlag); err != nil {
+            log.Fatal("Erro ao iniciar servidor: ", err)
         }
-        select {} // Mantém rodando
+        select {} // Mantém vivo
     } else {
-        // Modo menu interativo
         fmt.Println("=== Proxy Go 2.0 ===")
-        Menu()
+        RunMenu()
     }
 }
