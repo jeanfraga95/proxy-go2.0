@@ -14,64 +14,36 @@ import (
 )
 
 func StartServer(port int) error {
-    // === GERA CERTIFICADO TLS (se não existir) ===
-    certFile := fmt.Sprintf("/tmp/cert-%d.pem", port)
-    keyFile := fmt.Sprintf("/tmp/key-%d.pem", port)
-
-    if _, err := os.Stat(certFile); os.IsNotExist(err) {
-        if err := generateCert(certFile, keyFile); err != nil {
-            return fmt.Errorf("falha ao gerar certificado: %v", err)
-        }
-    }
-
-    cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-    if err != nil {
-        return fmt.Errorf("erro ao carregar certificado: %v", err)
-    }
-
-    // === CONFIGURA LOG POR PORTA ===
     logFile := fmt.Sprintf("/var/log/proxy-go2.0-%d.log", port)
     f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
     if err != nil {
-        return fmt.Errorf("erro ao abrir log: %v", err)
+        return err
     }
     log.SetOutput(f)
     log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
-    log.Printf("PROXY-GO2.0 iniciado na porta %d (SOCKS5 + WSS + CONNECT)", port)
+    log.Printf("PROXY-GO2.0 iniciado na porta %d", port)
 
-    // === CONFIGURA LISTENER TLS ===
-    tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
     listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
     if err != nil {
-        return fmt.Errorf("erro ao abrir porta %d: %v", port, err)
+        return err
     }
 
-    // === LOOP DE ACEITAÇÃO ===
     for {
         conn, err := listener.Accept()
         if err != nil {
-            log.Printf("Erro ao aceitar conexão: %v", err)
+            log.Printf("Accept error: %v", err)
             continue
         }
-        go handleClient(conn, tlsConfig.Clone(), port)
+        go handleClient(conn, port)
     }
 }
 
-func handleClient(rawConn net.Conn, tlsConfig *tls.Config, port int) {
-    defer rawConn.Close()
+func handleClient(conn net.Conn, port int) {
+    defer conn.Close()
 
-    // === TLS HANDSHAKE ===
-    tlsConn := tls.Server(rawConn, tlsConfig)
-    if err := tlsConn.Handshake(); err != nil {
-        log.Printf("TLS handshake falhou: %v", err)
-        return
-    }
-    defer tlsConn.Close()
-
-    // === LÊ PRIMEIROS BYTES ===
     buf := make([]byte, 1024)
-    tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-    n, err := tlsConn.Read(buf)
+    conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+    n, err := conn.Read(buf)
     if err != nil {
         return
     }
@@ -79,49 +51,35 @@ func handleClient(rawConn net.Conn, tlsConfig *tls.Config, port int) {
     data := string(buf[:n])
 
     // === DETECÇÃO DE PROTOCOLO ===
-    upperData := strings.ToUpper(data)
-
-    if strings.Contains(upperData, "CONNECT") || strings.Contains(upperData, "UPGRADE: WEBSOCKET") {
-        // HTTP CONNECT ou WSS
-        sendResponse(tlsConn, "HTTP/1.1 101 PROXY-GO2.0\r\n\r\n")
-        handleHTTPTunnel(tlsConn, data)
+    if strings.Contains(strings.ToUpper(data), "CONNECT") || strings.Contains(data, "Upgrade: websocket") {
+        sendResponse(conn, "HTTP/1.1 101 PROXY-GO2.0\r\n\r\n")
+        handleHTTPTunnel(conn, data)
     } else if buf[0] == 0x05 {
-        // SOCKS5
-        sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
-        handleSOCKS5(tlsConn)
+        sendResponse(conn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
+        handleSOCKS5(conn)
     } else {
-        // Fallback
-        sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
+        sendResponse(conn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
     }
 }
 
 func sendResponse(conn net.Conn, msg string) {
     conn.Write([]byte(msg))
-    log.Printf("→ Resposta: %s", strings.TrimSpace(msg))
+    log.Printf("→ %s", strings.TrimSpace(msg))
 }
 
-// === TUNNEL HTTP (CONNECT / WSS) ===
 func handleHTTPTunnel(client net.Conn, request string) {
-    var host string
-    lines := strings.Split(strings.TrimSpace(request), "\n")
-    for _, line := range lines {
-        if strings.HasPrefix(strings.TrimSpace(line), "CONNECT") {
-            parts := strings.Fields(line)
-            if len(parts) >= 2 {
-                host = parts[1]
-            }
-            break
+    host := "httpbin.org:80"
+    if strings.Contains(request, "CONNECT") {
+        parts := strings.Fields(strings.Split(request, "\n")[0])
+        if len(parts) > 1 {
+            host = parts[1]
         }
     }
-    if host == "" {
-        host = "httpbin.org:80"
-    }
 
-    log.Printf("Túnel HTTP/CONNECT → %s", host)
-
+    log.Printf("Túnel → %s", host)
     remote, err := net.Dial("tcp", host)
     if err != nil {
-        log.Printf("Falha ao conectar ao destino %s: %v", host, err)
+        log.Printf("Falha: %v", err)
         return
     }
     defer remote.Close()
@@ -130,19 +88,15 @@ func handleHTTPTunnel(client net.Conn, request string) {
     io.Copy(client, remote)
 }
 
-// === SOCKS5 REAL (com forwarding) ===
 func handleSOCKS5(client net.Conn) {
     log.Println("SOCKS5 iniciado")
 
-    // Handshake: versão + métodos
     buf := make([]byte, 3)
     if _, err := io.ReadFull(client, buf); err != nil || buf[0] != 0x05 {
-        log.Println("SOCKS5 handshake inválido")
         return
     }
-    client.Write([]byte{0x05, 0x00}) // Sem autenticação
+    client.Write([]byte{0x05, 0x00})
 
-    // Request
     buf = make([]byte, 10)
     if _, err := io.ReadFull(client, buf); err != nil {
         return
@@ -150,13 +104,11 @@ func handleSOCKS5(client net.Conn) {
 
     var addr string
     switch buf[3] {
-    case 0x01: // IPv4
+    case 0x01:
         addr = net.IP(buf[4:8]).String()
-    case 0x03: // Domínio
-        len := int(buf[4])
-        addr = string(buf[5 : 5+len])
-    case 0x04: // IPv6
-        addr = net.IP(buf[4:20]).String()
+    case 0x03:
+        l := int(buf[4])
+        addr = string(buf[5 : 5+l])
     default:
         client.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
         return
@@ -164,26 +116,15 @@ func handleSOCKS5(client net.Conn) {
     port := int(buf[len(buf)-2])<<8 + int(buf[len(buf)-1])
     target := fmt.Sprintf("%s:%d", addr, port)
 
-    log.Printf("SOCKS5 → Conectando a %s", target)
-
+    log.Printf("SOCKS5 → %s", target)
     remote, err := net.Dial("tcp", target)
     if err != nil {
-        log.Printf("Falha ao conectar a %s: %v", target, err)
         client.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
         return
     }
     defer remote.Close()
 
     client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-
     go io.Copy(remote, client)
     io.Copy(client, remote)
-}
-
-// === GERA CERTIFICADO AUTO-ASSINADO ===
-func generateCert(certFile, keyFile string) error {
-    cmd := exec.Command("openssl", "req", "-new", "-newkey", "rsa:2048", "-days", "365",
-        "-nodes", "-x509", "-keyout", keyFile, "-out", certFile,
-        "-subj", "/CN=proxy-go2.0") // VÍRGULA CORRIGIDA AQUI
-    return cmd.Run()
 }
