@@ -6,7 +6,7 @@ SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
 LOG_DIR="/var/log"
 
-echo "=== PROXY-GO2.0 (PERSISTENTE) ==="
+echo "=== PROXY-GO2.0 (PERSISTENTE + LOGS) ==="
 
 sudo rm -rf "$INSTALL_DIR"
 sudo mkdir -p "$INSTALL_DIR" "$SRC_DIR" "$LOG_DIR"
@@ -29,8 +29,8 @@ go build -o "$BIN" .
 
 sudo chmod +x "$BIN"
 sudo chown root:root "$BIN"
-sudo touch "$stateFile"
-sudo chown root:root "$stateFile"
+sudo touch /opt/proxy-go2.0/ports.json
+sudo chown root:root /opt/proxy-go2.0/ports.json
 
 sudo tee /etc/systemd/system/proxy-go2.0.service > /dev/null << EOF
 [Unit]
@@ -49,6 +49,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-go2.0
 
-echo "INSTALADO COM PERSISTÊNCIA!"
+echo "INSTALADO COM SUCESSO!"
 echo "Menu: sudo $BIN"
-echo "Estado salvo em: $stateFile"
+echo "Logs: sudo tail -f /var/log/proxy-go2.0-*.log"
