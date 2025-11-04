@@ -5,18 +5,15 @@ INSTALL_DIR="/opt/proxy-go2.0"
 SRC_DIR="$INSTALL_DIR/src"
 BIN="$INSTALL_DIR/proxy"
 
-echo "=== Instalando Proxy Go 2.0 ==="
+echo "=== PROXY-GO2.0 TUNNEL ==="
 
-# Remove instalação antiga
 sudo rm -rf "$INSTALL_DIR"
 mkdir -p "$SRC_DIR"
 cd "$SRC_DIR"
 
-# Clona repo
 git clone https://github.com/jeanfraga95/proxy-go2.0.git .
 cd ..
 
-# Instala Go
 if ! command -v go &> /dev/null; then
     wget -q https://go.dev/dl/go1.22.8.linux-amd64.tar.gz
     sudo rm -rf /usr/local/go
@@ -25,24 +22,21 @@ if ! command -v go &> /dev/null; then
     source /etc/profile.d/go.sh
 fi
 
-# Compila
 cd "$SRC_DIR"
 go mod tidy
 go build -o "$BIN" .
 
 chmod +x "$BIN"
 
-# Systemd
 sudo tee /etc/systemd/system/proxy-go2.0.service > /dev/null << EOF
 [Unit]
-Description=Proxy Go 2.0
+Description=Proxy Go 2.0 Tunnel
 After=network.target
 
 [Service]
 ExecStart=$BIN
 WorkingDirectory=$INSTALL_DIR
 Restart=always
-RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
@@ -51,6 +45,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-go2.0
 
-echo "INSTALADO COM SUCESSO!"
+echo "INSTALADO!"
 echo "Menu: sudo $BIN"
-echo "Logs: sudo journalctl -u proxy-go2.0 -f"
+echo "Teste: curl -x socks5://localhost:80 httpbin.org/ip"
