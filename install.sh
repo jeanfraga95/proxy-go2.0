@@ -7,17 +7,8 @@ BIN="$INSTALL_DIR/proxy"
 
 echo "=== Instalando Proxy Go 2.0 ==="
 
-# Verifica Ubuntu
-source /etc/os-release
-if [[ "$ID" != "ubuntu" ]] || ! [[ "$VERSION_ID" =~ ^(18.04|20.04|22.04|24.04)$ ]]; then
-    echo "Erro: apenas Ubuntu 18/20/22/24"
-    exit 1
-fi
-
-# Remove instalação anterior
+# Remove instalação antiga
 sudo rm -rf "$INSTALL_DIR"
-
-# Cria diretórios
 mkdir -p "$SRC_DIR"
 cd "$SRC_DIR"
 
@@ -25,13 +16,13 @@ cd "$SRC_DIR"
 git clone https://github.com/jeanfraga95/proxy-go2.0.git .
 cd ..
 
-# Instala Go se necessário
+# Instala Go
 if ! command -v go &> /dev/null; then
     wget -q https://go.dev/dl/go1.22.8.linux-amd64.tar.gz
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf go1.22.8.linux-amd64.tar.gz
     echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee /etc/profile.d/go.sh
-    export PATH=$PATH:/usr/local/go/bin
+    source /etc/profile.d/go.sh
 fi
 
 # Compila
