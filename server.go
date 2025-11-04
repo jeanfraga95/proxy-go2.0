@@ -174,4 +174,16 @@ func handleSOCKS5(client net.Conn) {
     }
     defer remote.Close()
 
-    client.Write([]byte{0x05, 0x00, 0x00, 0
+    client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+
+    go io.Copy(remote, client)
+    io.Copy(client, remote)
+}
+
+// === GERA CERTIFICADO AUTO-ASSINADO ===
+func generateCert(certFile, keyFile string) error {
+    cmd := exec.Command("openssl", "req", "-new", "-newkey", "rsa:2048", "-days", "365",
+        "-nodes", "-x509", "-keyout", keyFile, "-out", certFile,
+        "-subj", "/CN=proxy-go2.0") // VÍRGULA CORRIGIDA AQUI
+    return cmd.Run()
+}
