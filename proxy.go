@@ -60,18 +60,22 @@ func RunMenu() {
         fmt.Println("5. Sair")
         fmt.Print("\nEscolha: ")
 
-        if !scanner.Scan() { break }
+        if !scanner.Scan() {
+            fmt.Println("\nSaindo...")
+            time.Sleep(1)
+            return
+        }
         choice := strings.TrimSpace(scanner.Text())
 
         switch choice {
         case "1":
             clearScreen()
             fmt.Print("Porta: ")
-            scanner.Scan()
+            if !scanner.Scan() { return }
             port, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
             if port < 1 || port > 65535 {
                 fmt.Println("Porta inválida!")
-                time.Sleep(2)
+                waitEnter()
                 continue
             }
             if _, exists := instances[port]; exists {
@@ -80,10 +84,30 @@ func RunMenu() {
                 fmt.Printf("Erro: %v\n", err)
             } else {
                 fmt.Printf("Proxy iniciado na porta %d\n", port)
-                instances = loadState() // recarrega
+                instances = loadState()
             }
-            fmt.Print("\nENTER...")
-            scanner.Scan()
+            waitEnter()
+
+        case "2":
+            clearScreen()
+            fmt.Print("Porta para fechar: ")
+            if !scanner.Scan() { return }
+            port, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
+            if err := StopProxy(port, &instances); err != nil {
+                fmt.Printf("Erro: %v\n", err)
+            } else {
+                fmt.Printf("Porta %d fechada.\n", port)
+                saveState(instances)
+            }
+            waitEnter()
+
+        case "3":
+            clearScreen()
+            fmt.Print("Porta para logs: ")
+            if !scanner.Scan() { return }
+            port, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
+            ViewLogs(port)
+            waitEnter()
 
         case "4":
             clearScreen()
@@ -96,10 +120,25 @@ func RunMenu() {
                     fmt.Printf("  → %d (PID: %d)\n", p, i.PID)
                 }
             }
-            fmt.Print("\nENTER...")
-            scanner.Scan()
+            waitEnter()
+
+        case "5":
+            clearScreen()
+            fmt.Println("Saindo... Portas continuam ativas!")
+            time.Sleep(1)
+            return
+
+        default:
+            clearScreen()
+            fmt.Println("Opção inválida!")
+            waitEnter()
         }
     }
+}
+
+func waitEnter() {
+    fmt.Print("\nPressione ENTER para continuar...")
+    bufio.NewReader(os.Stdin).ReadString('\n')
 }
 
 func StartBackgroundProxy(port int) error {
@@ -108,10 +147,32 @@ func StartBackgroundProxy(port int) error {
     if err := cmd.Start(); err != nil {
         return err
     }
-
     inst := &ProxyInstance{Port: port, PID: cmd.Process.Pid}
     instances := loadState()
     instances[port] = inst
     saveState(instances)
     return nil
+}
+
+func StopProxy(port int, instances *map[int]*ProxyInstance) error {
+    inst, ok := (*instances)[port]
+    if !ok { return fmt.Errorf("porta %d não encontrada", port) }
+    proc, _ := os.FindProcess(inst.PID)
+    proc.Signal(syscall.SIGKILL)
+    delete(*instances, port)
+    return nil
+}
+
+func ViewLogs(port int) {
+    logFile := fmt.Sprintf("/var/log/proxy-go2.0-%d.log", port)
+    data, _ := os.ReadFile(logFile)
+    lines := strings.Split(string(data), "\n")
+    start := len(lines) - 20
+    if start < 0 { start = 0 }
+    fmt.Printf("Logs da porta %d (últimos 20):\n\n", port)
+    for i := start; i < len(lines); i++ {
+        if lines[i] != "" {
+            fmt.Printf("  %s\n", lines[i])
+        }
+    }
 }
