@@ -14,28 +14,35 @@ if [[ "$ID" != "ubuntu" ]] || ! [[ "$VERSION_ID" =~ ^(18.04|20.04|22.04|24.04)$ 
     exit 1
 fi
 
-# Instala dependências
-apt install -y git wget openssl openssh-server
+# Remove instalação anterior
+sudo rm -rf "$INSTALL_DIR"
 
-# Instala Go
+# Cria diretórios
+mkdir -p "$SRC_DIR"
+cd "$SRC_DIR"
+
+# Clona repo
+git clone https://github.com/jeanfraga95/proxy-go2.0.git .
+cd ..
+
+# Instala Go se necessário
 if ! command -v go &> /dev/null; then
     wget -q https://go.dev/dl/go1.22.8.linux-amd64.tar.gz
-    tar -C /usr/local -xzf go1.22.8.linux-amd64.tar.gz
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+    sudo rm -rf /usr/local/go
+    sudo tar -C /usr/local -xzf go1.22.8.linux-amd64.tar.gz
+    echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee /etc/profile.d/go.sh
     export PATH=$PATH:/usr/local/go/bin
 fi
 
-# Clona e compila
-mkdir -p "$SRC_DIR"
+# Compila
 cd "$SRC_DIR"
-git clone https://github.com/jeanfraga95/proxy-go2.0.git . || git pull
 go mod tidy
 go build -o "$BIN" .
 
 chmod +x "$BIN"
 
 # Systemd
-cat > /etc/systemd/system/proxy-go2.0.service << EOF
+sudo tee /etc/systemd/system/proxy-go2.0.service > /dev/null << EOF
 [Unit]
 Description=Proxy Go 2.0
 After=network.target
@@ -44,13 +51,15 @@ After=network.target
 ExecStart=$BIN
 WorkingDirectory=$INSTALL_DIR
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now proxy-go2.0
+sudo systemctl daemon-reload
+sudo systemctl enable --now proxy-go2.0
 
-echo "INSTALADO! Use: $BIN"
-echo "Logs: journalctl -u proxy-go2.0 -f"
+echo "INSTALADO COM SUCESSO!"
+echo "Menu: sudo $BIN"
+echo "Logs: sudo journalctl -u proxy-go2.0 -f"
