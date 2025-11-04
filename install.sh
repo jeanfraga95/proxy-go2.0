@@ -15,7 +15,7 @@ if [[ "$ID" != "ubuntu" ]] || ! [[ "$VERSION_ID" =~ ^(18.04|20.04|22.04|24.04)$ 
 fi
 
 # Instala dependências
-apt update && apt install -y git wget openssl openssh-server
+apt install -y git wget openssl openssh-server
 
 # Instala Go
 if ! command -v go &> /dev/null; then
