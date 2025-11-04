@@ -2,13 +2,11 @@
 package main
 
 import (
-    "crypto/tls"
     "fmt"
     "io"
     "log"
     "net"
     "os"
-    "os/exec"
     "strings"
     "time"
 )
@@ -21,7 +19,7 @@ func StartServer(port int) error {
     }
     log.SetOutput(f)
     log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
-    log.Printf("PROXY-GO2.0 iniciado na porta %d", port)
+    log.Printf("PROXY-GO2.0 iniciado na porta %d (SOCKS5 + HTTP CONNECT)", port)
 
     listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
     if err != nil {
@@ -76,10 +74,10 @@ func handleHTTPTunnel(client net.Conn, request string) {
         }
     }
 
-    log.Printf("Túnel → %s", host)
+    log.Printf("Túnel HTTP → %s", host)
     remote, err := net.Dial("tcp", host)
     if err != nil {
-        log.Printf("Falha: %v", err)
+        log.Printf("Falha ao conectar: %v", err)
         return
     }
     defer remote.Close()
@@ -93,6 +91,7 @@ func handleSOCKS5(client net.Conn) {
 
     buf := make([]byte, 3)
     if _, err := io.ReadFull(client, buf); err != nil || buf[0] != 0x05 {
+        log.Println("Handshake inválido")
         return
     }
     client.Write([]byte{0x05, 0x00})
