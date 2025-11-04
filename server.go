@@ -14,29 +14,43 @@ import (
 )
 
 func StartServer(port int) error {
+    // === GERA CERTIFICADO TLS (se não existir) ===
     certFile := fmt.Sprintf("/tmp/cert-%d.pem", port)
     keyFile := fmt.Sprintf("/tmp/key-%d.pem", port)
 
     if _, err := os.Stat(certFile); os.IsNotExist(err) {
-        generateCert(certFile, keyFile)
+        if err := generateCert(certFile, keyFile); err != nil {
+            return fmt.Errorf("falha ao gerar certificado: %v", err)
+        }
     }
 
     cert, err := tls.LoadX509KeyPair(certFile, keyFile)
     if err != nil {
-        return err
+        return fmt.Errorf("erro ao carregar certificado: %v", err)
     }
 
+    // === CONFIGURA LOG POR PORTA ===
+    logFile := fmt.Sprintf("/var/log/proxy-go2.0-%d.log", port)
+    f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    if err != nil {
+        return fmt.Errorf("erro ao abrir log: %v", err)
+    }
+    log.SetOutput(f)
+    log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+    log.Printf("PROXY-GO2.0 iniciado na porta %d (SOCKS5 + WSS + CONNECT)", port)
+
+    // === CONFIGURA LISTENER TLS ===
     tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
     listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
     if err != nil {
-        return err
+        return fmt.Errorf("erro ao abrir porta %d: %v", port, err)
     }
 
-    log.Printf("PROXY-GO2.0 rodando na porta %d (SOCKS5 + WSS Tunnel)", port)
-
+    // === LOOP DE ACEITAÇÃO ===
     for {
         conn, err := listener.Accept()
         if err != nil {
+            log.Printf("Erro ao aceitar conexão: %v", err)
             continue
         }
         go handleClient(conn, tlsConfig.Clone(), port)
@@ -46,13 +60,15 @@ func StartServer(port int) error {
 func handleClient(rawConn net.Conn, tlsConfig *tls.Config, port int) {
     defer rawConn.Close()
 
+    // === TLS HANDSHAKE ===
     tlsConn := tls.Server(rawConn, tlsConfig)
     if err := tlsConn.Handshake(); err != nil {
-        log.Println("TLS handshake falhou:", err)
+        log.Printf("TLS handshake falhou: %v", err)
         return
     }
     defer tlsConn.Close()
 
+    // === LÊ PRIMEIROS BYTES ===
     buf := make([]byte, 1024)
     tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
     n, err := tlsConn.Read(buf)
@@ -63,46 +79,53 @@ func handleClient(rawConn net.Conn, tlsConfig *tls.Config, port int) {
     data := string(buf[:n])
 
     // === DETECÇÃO DE PROTOCOLO ===
-    if strings.Contains(strings.ToUpper(data), "UPGRADE: WEBSOCKET") || strings.Contains(data, "CONNECT") {
+    upperData := strings.ToUpper(data)
+
+    if strings.Contains(upperData, "CONNECT") || strings.Contains(upperData, "UPGRADE: WEBSOCKET") {
+        // HTTP CONNECT ou WSS
         sendResponse(tlsConn, "HTTP/1.1 101 PROXY-GO2.0\r\n\r\n")
         handleHTTPTunnel(tlsConn, data)
     } else if buf[0] == 0x05 {
+        // SOCKS5
         sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
         handleSOCKS5(tlsConn)
     } else {
+        // Fallback
         sendResponse(tlsConn, "HTTP/1.1 200 PROXY-GO2.0\r\n\r\n")
     }
 }
 
 func sendResponse(conn net.Conn, msg string) {
     conn.Write([]byte(msg))
-    log.Printf("→ %s", strings.TrimSpace(msg))
+    log.Printf("→ Resposta: %s", strings.TrimSpace(msg))
 }
 
 // === TUNNEL HTTP (CONNECT / WSS) ===
 func handleHTTPTunnel(client net.Conn, request string) {
     var host string
-    lines := strings.Split(request, "\n")
+    lines := strings.Split(strings.TrimSpace(request), "\n")
     for _, line := range lines {
         if strings.HasPrefix(strings.TrimSpace(line), "CONNECT") {
-            host = strings.Fields(line)[1]
+            parts := strings.Fields(line)
+            if len(parts) >= 2 {
+                host = parts[1]
+            }
             break
         }
     }
     if host == "" {
-        host = "httpbin.org:80" // fallback
+        host = "httpbin.org:80"
     }
 
-    log.Printf("Túnel HTTP para %s", host)
+    log.Printf("Túnel HTTP/CONNECT → %s", host)
 
     remote, err := net.Dial("tcp", host)
     if err != nil {
-        log.Println("Falha ao conectar ao destino:", err)
+        log.Printf("Falha ao conectar ao destino %s: %v", host, err)
         return
     }
     defer remote.Close()
 
-    // Bidirectional copy
     go io.Copy(remote, client)
     io.Copy(client, remote)
 }
@@ -111,12 +134,13 @@ func handleHTTPTunnel(client net.Conn, request string) {
 func handleSOCKS5(client net.Conn) {
     log.Println("SOCKS5 iniciado")
 
-    // Handshake SOCKS5
+    // Handshake: versão + métodos
     buf := make([]byte, 3)
     if _, err := io.ReadFull(client, buf); err != nil || buf[0] != 0x05 {
+        log.Println("SOCKS5 handshake inválido")
         return
     }
-    client.Write([]byte{0x05, 0x00}) // No auth
+    client.Write([]byte{0x05, 0x00}) // Sem autenticação
 
     // Request
     buf = make([]byte, 10)
@@ -128,9 +152,11 @@ func handleSOCKS5(client net.Conn) {
     switch buf[3] {
     case 0x01: // IPv4
         addr = net.IP(buf[4:8]).String()
-    case 0x03: // Domain
+    case 0x03: // Domínio
         len := int(buf[4])
         addr = string(buf[5 : 5+len])
+    case 0x04: // IPv6
+        addr = net.IP(buf[4:20]).String()
     default:
         client.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
         return
@@ -142,24 +168,10 @@ func handleSOCKS5(client net.Conn) {
 
     remote, err := net.Dial("tcp", target)
     if err != nil {
+        log.Printf("Falha ao conectar a %s: %v", target, err)
         client.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
         return
     }
     defer remote.Close()
 
-    client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-
-    go io.Copy(remote, client)
-    io.Copy(client, remote)
-}
-
-func generateCert(certFile, keyFile string) {
-    exec.Command("openssl", "req", "-new", "-newkey", "rsa:2048", "-days", "365",
-        "-nodes", "-x509", "-keyout", keyFile, "-out", certFile,
-        "-subj", "/CN=proxy-go2.0").Run()
-}
-
-func authenticateWithSSH(conn net.Conn) {
-    // Placeholder: autenticação via SSH local (opcional)
-    // Por enquanto, ignora (ou use usuário/senha depois)
-}
+    client.Write([]byte{0x05, 0x00, 0x00, 0
